@@ -187,7 +187,7 @@ def compute_inclusion_scores(masks_data, use_gpu=True, batch_size=128):
             d_masks[buf][:this_bs, :], d_center, area_center, d_out[buf][:this_bs]
         )
 
-        # 4) 异步 D2H 回到 pinned host 输出缓冲，并在计算流上记录"完成事件"
+        # 4) 异步 D2H 回到 pinned host 输出缓冲，并在计算流上记录“完成事件”
         d_out[buf][:this_bs].copy_to_host(h_out[buf][:this_bs], stream=stream_k)
         if done_evt[buf] is None:
             done_evt[buf] = cuda.event(timing=False)
@@ -218,7 +218,7 @@ def compute_inclusion_scores(masks_data, use_gpu=True, batch_size=128):
     t_total = time.time() - t_total0
     other_time = t_total - preprocessing_time - prewarm_time - gpu_compute_time - gpu_h2d_time - gpu_d2h_time
 
-    # 进一步拆解 "其他开销"
+    # 进一步拆解 “其他开销”
     other_setup_alloc_copy = setup_streams_time + alloc_buffers_time + h2h_copy_time
     misc_time = other_time - other_setup_alloc_copy
     if misc_time < 0:
@@ -242,108 +242,6 @@ def compute_inclusion_scores(masks_data, use_gpu=True, batch_size=128):
 # =========================
 # 数据加载/分析/可视化
 # =========================
-
-def compute_inclusion_scores_loop(masks_data):
-    """
-    方法二：逐样本循环版的包含分数深度计算（CPU循环实现）
-    与方法一相同公式，但逐样本遍历，便于与矢量化/GPU结果进行一致性对比。
-    """
-    print("\n=== 开始计算包含分数深度（方法二：逐样本循环） ===")
-    start_time = time.time()
-
-    num_samples = masks_data.shape[0]
-    masks_flattened = masks_data.reshape(num_samples, -1).astype(np.float32, copy=False)
-    original_center = np.mean(masks_flattened, axis=0, dtype=np.float32)
-
-    inclusion_scores = []
-    area_center = float(np.sum(original_center, dtype=np.float32))
-    inv_center = (1.0 - original_center).astype(np.float32, copy=False)
-
-    for i in range(num_samples):
-        mask = masks_flattened[i]
-        area_mask = float(np.sum(mask, dtype=np.float32))
-
-        if area_mask > 0.0 and area_center > 0.0:
-            inclusion_score1 = 1.0 - float(np.sum(inv_center * mask, dtype=np.float32)) / area_mask
-            inv_mask = (1.0 - mask).astype(np.float32, copy=False)
-            inclusion_score2 = 1.0 - float(np.sum(inv_mask * original_center, dtype=np.float32)) / area_center
-            depth = min(inclusion_score1, inclusion_score2)
-        else:
-            depth = 0.0
-
-        inclusion_scores.append(depth)
-        if (i + 1) % 10 == 0 or i == num_samples - 1:
-            print(f"已处理 {i + 1}/{num_samples} 个mask（方法二）")
-
-    inclusion_scores = np.asarray(inclusion_scores, dtype=np.float32)
-
-    end_time = time.time()
-    print(f"包含分数深度（方法二）计算完成，耗时: {end_time - start_time:.2f}秒")
-    print("深度分数（方法二）统计:")
-    print(f"  最小深度: {np.min(inclusion_scores):.4f}")
-    print(f"  最大深度: {np.max(inclusion_scores):.4f}")
-    print(f"  平均深度: {np.mean(inclusion_scores):.4f}")
-    print(f"  深度标准差: {np.std(inclusion_scores):.4f}")
-
-    return inclusion_scores
-
-
-def compare_inclusion_methods(scores1, scores2, atol=1e-6, rtol=1e-6, make_plot=True):
-    """
-    比较两种方法的深度分数是否一致，并可视化对比。
-    """
-    print("\n=== 开始比较两种深度计算方法的结果一致性 ===")
-    scores1 = np.asarray(scores1, dtype=np.float32)
-    scores2 = np.asarray(scores2, dtype=np.float32)
-
-    diffs = scores1 - scores2
-    abs_diffs = np.abs(diffs)
-    max_abs_diff = float(np.max(abs_diffs))
-    mean_abs_diff = float(np.mean(abs_diffs))
-    tol = atol + rtol * np.abs(scores1)
-    num_out_of_tol = int(np.sum(abs_diffs > tol))
-    ratio_out = num_out_of_tol / len(scores1) if len(scores1) > 0 else 0.0
-    consistent = (num_out_of_tol == 0)
-
-    print(f"样本数: {len(scores1)}")
-    print(f"最大绝对差: {max_abs_diff:.6e}")
-    print(f"平均绝对差: {mean_abs_diff:.6e}")
-    print(f"超出容差数量: {num_out_of_tol} ({ratio_out*100:.2f}%)")
-    print(f"是否在容差内一致: {consistent}")
-
-    if make_plot:
-        plt.figure(figsize=(12, 5))
-        # 左：散点对比
-        plt.subplot(1, 2, 1)
-        plt.scatter(scores1, scores2, s=10, alpha=0.6)
-        mn = float(min(np.min(scores1), np.min(scores2)))
-        mx = float(max(np.max(scores1), np.max(scores2)))
-        plt.plot([mn, mx], [mn, mx], 'r--', linewidth=1.5, label='y=x')
-        plt.xlabel('Method 1 Depth')
-        plt.ylabel('Method 2 Depth')
-        plt.title('Depth Comparison: Method 1 vs Method 2')
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-
-        # 右：差值直方图
-        plt.subplot(1, 2, 2)
-        plt.hist(diffs, bins=30, alpha=0.7, edgecolor='black')
-        plt.xlabel('Difference (Method1 - Method2)')
-        plt.ylabel('Frequency')
-        plt.title('Histogram of Depth Differences')
-        plt.grid(True, alpha=0.3)
-
-        plt.tight_layout()
-        plt.show()
-
-    return {
-        'consistent': consistent,
-        'max_abs_diff': max_abs_diff,
-        'mean_abs_diff': mean_abs_diff,
-        'num_out_of_tol': num_out_of_tol,
-        'ratio_out_of_tol': ratio_out,
-    }
-
 
 def load_all_masks(mask_dir):
     """
@@ -381,11 +279,11 @@ def load_all_masks(mask_dir):
             if data.shape != mask_shape:
                 print(f"  警告: 形状不匹配 {data.shape} vs {mask_shape}，跳过")
                 continue
-            data_binary = (data > 0).astype(np.float32)
-            masks_data[successful_loads] = data_binary
+            data_f32 = data.astype(np.float32, copy=False)
+            masks_data[successful_loads] = data_f32
             mask_names.append(os.path.basename(nii_file))
             successful_loads += 1
-            voxel_count = np.sum(data_binary)
+            voxel_count = np.count_nonzero(data_f32)
             print(f"  激活体素数: {voxel_count:,}")
         except Exception as e:
             print(f"  加载失败: {str(e)}")
@@ -523,6 +421,203 @@ Percentiles:
     plt.show()
 
 
+def create_mask_operations(masks_data, sorted_indices, mask_names, affine, header, output_dir):
+    """
+    创建前50%深度的并集、前100%并集、前50%交集三个文件
+    
+    Parameters:
+    masks_data: numpy array, 所有mask数据
+    sorted_indices: numpy array, 按深度排序的索引
+    mask_names: list, mask文件名
+    affine: numpy array, NIfTI仿射变换矩阵
+    header: NIfTI header
+    output_dir: str, 输出目录路径
+    
+    Returns:
+    results: dict, 包含三个操作的结果
+    """
+    print(f"\n=== 开始创建Mask操作结果 ===")
+    start_time = time.time()
+    
+    os.makedirs(output_dir, exist_ok=True)
+    
+    total_count = len(sorted_indices)
+    top_50_count = total_count // 2
+    
+    print(f"总mask数量: {total_count}")
+    print(f"前50%数量: {top_50_count}")
+    
+    # 1. 前50%深度的并集
+    print(f"\n--- 计算前50%深度的并集 ---")
+    top_50_indices = sorted_indices[:top_50_count]
+    top_50_masks = masks_data[top_50_indices]
+    union_50 = np.any(top_50_masks > 0, axis=0).astype(np.uint8)
+    
+    print(f"前50%深度的mask文件:")
+    for i, idx in enumerate(top_50_indices):
+        print(f"  {i+1:2d}. {mask_names[idx]}")
+    
+    # 2. 前100%（全部）的并集
+    print(f"\n--- 计算前100%（全部）的并集 ---")
+    union_100 = np.any(masks_data > 0, axis=0).astype(np.uint8)
+    
+    # 3. 前50%深度的交集
+    print(f"\n--- 计算前50%深度的交集 ---")
+    intersection_50 = np.all(top_50_masks > 0, axis=0).astype(np.uint8)
+    
+    # 计算统计信息
+    union_50_voxels = np.sum(union_50)
+    union_100_voxels = np.sum(union_100)
+    intersection_50_voxels = np.sum(intersection_50)
+    total_voxels = union_50.size
+    
+    print(f"\n=== 操作结果统计 ===")
+    print(f"前50%深度并集激活体素: {union_50_voxels:,} ({union_50_voxels/total_voxels*100:.2f}%)")
+    print(f"前100%并集激活体素: {union_100_voxels:,} ({union_100_voxels/total_voxels*100:.2f}%)")
+    print(f"前50%深度交集激活体素: {intersection_50_voxels:,} ({intersection_50_voxels/total_voxels*100:.2f}%)")
+    
+    # 保存文件
+    results = {}
+    
+    # 保存前50%深度的并集
+    union_50_img = nib.Nifti1Image(union_50, affine, header)
+    union_50_path = os.path.join(output_dir, "top50percent_depth_union.nii")
+    nib.save(union_50_img, union_50_path)
+    results['union_50'] = {'data': union_50, 'path': union_50_path, 'voxels': union_50_voxels}
+    print(f"前50%深度并集已保存: {union_50_path}")
+    
+    # 保存前100%并集
+    union_100_img = nib.Nifti1Image(union_100, affine, header)
+    union_100_path = os.path.join(output_dir, "all_masks_union.nii")
+    nib.save(union_100_img, union_100_path)
+    results['union_100'] = {'data': union_100, 'path': union_100_path, 'voxels': union_100_voxels}
+    print(f"前100%并集已保存: {union_100_path}")
+    
+    # 保存前50%深度交集
+    intersection_50_img = nib.Nifti1Image(intersection_50, affine, header)
+    intersection_50_path = os.path.join(output_dir, "top50percent_depth_intersection.nii")
+    nib.save(intersection_50_img, intersection_50_path)
+    results['intersection_50'] = {'data': intersection_50, 'path': intersection_50_path, 'voxels': intersection_50_voxels}
+    print(f"前50%深度交集已保存: {intersection_50_path}")
+    
+    # 保存详细报告
+    report_path = os.path.join(output_dir, "depth_analysis_report.txt")
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write(f"包含分数深度分析报告\n")
+        f.write("="*50 + "\n\n")
+        f.write(f"分析时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"总mask文件数: {total_count}\n")
+        f.write(f"前50%数量: {top_50_count}\n\n")
+        
+        f.write(f"结果统计:\n")
+        f.write(f"前50%深度并集激活体素: {union_50_voxels:,} ({union_50_voxels/total_voxels*100:.2f}%)\n")
+        f.write(f"前100%并集激活体素: {union_100_voxels:,} ({union_100_voxels/total_voxels*100:.2f}%)\n")
+        f.write(f"前50%深度交集激活体素: {intersection_50_voxels:,} ({intersection_50_voxels/total_voxels*100:.2f}%)\n\n")
+        
+        f.write(f"前50%深度最高的mask文件列表:\n")
+        for i, idx in enumerate(top_50_indices):
+            f.write(f"{i+1:2d}. {mask_names[idx]}\n")
+        
+        f.write(f"\n生成的文件:\n")
+        f.write(f"- {os.path.basename(union_50_path)}: 前50%深度并集\n")
+        f.write(f"- {os.path.basename(union_100_path)}: 前100%并集\n")
+        f.write(f"- {os.path.basename(intersection_50_path)}: 前50%深度交集\n")
+    
+    print(f"详细报告已保存: {report_path}")
+    
+    end_time = time.time()
+    print(f"Mask操作完成，耗时: {end_time - start_time:.2f}秒")
+    
+    return results
+
+
+def visualize_mask_operations(results, output_dir=None):
+    """
+    可视化三个mask操作的结果
+    
+    Parameters:
+    results: dict, 包含三个操作的结果
+    output_dir: str, 输出目录（可选）
+    """
+    print(f"\n=== 开始可视化Mask操作结果 ===")
+    
+    fig = plt.figure(figsize=(20, 15))
+    
+    operations = [
+        ('union_50', 'Top 50% Depth Union', 'Reds'),
+        ('union_100', 'All Masks Union', 'Blues'), 
+        ('intersection_50', 'Top 50% Depth Intersection', 'Greens')
+    ]
+    
+    for op_idx, (op_key, op_title, colormap) in enumerate(operations):
+        if op_key not in results:
+            continue
+            
+        mask_data = results[op_key]['data']
+        voxel_count = results[op_key]['voxels']
+        
+        # 计算中心切片
+        depth, height, width = mask_data.shape
+        center_z = depth // 2
+        center_y = height // 2
+        center_x = width // 2
+        
+        # 轴状切片
+        plt.subplot(3, 4, op_idx*4 + 1)
+        axial_slice = mask_data[center_z, :, :]
+        plt.imshow(axial_slice, cmap=colormap, origin='lower')
+        plt.title(f'{op_title}\nAxial (Z={center_z})')
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.colorbar()
+        
+        # 冠状切片
+        plt.subplot(3, 4, op_idx*4 + 2)
+        coronal_slice = mask_data[:, center_y, :]
+        plt.imshow(coronal_slice, cmap=colormap, origin='lower')
+        plt.title(f'Coronal (Y={center_y})')
+        plt.xlabel('X')
+        plt.ylabel('Z')
+        plt.colorbar()
+        
+        # 矢状切片
+        plt.subplot(3, 4, op_idx*4 + 3)
+        sagittal_slice = mask_data[:, :, center_x]
+        plt.imshow(sagittal_slice, cmap=colormap, origin='lower')
+        plt.title(f'Sagittal (X={center_x})')
+        plt.xlabel('Y')
+        plt.ylabel('Z')
+        plt.colorbar()
+        
+        # 统计信息
+        plt.subplot(3, 4, op_idx*4 + 4)
+        total_voxels = mask_data.size
+        activation_ratio = voxel_count / total_voxels * 100
+        
+        # 每个切片的激活体素数量
+        axial_activation = np.sum(mask_data, axis=(1, 2))
+        max_axial = np.max(axial_activation)
+        
+        stats_text = f"""Statistics for {op_title}:
+
+Total Voxels: {total_voxels:,}
+Active Voxels: {voxel_count:,}
+Activation Ratio: {activation_ratio:.2f}%
+
+Max Axial Activation: {max_axial:,}
+Mean Axial Activation: {np.mean(axial_activation):.1f}
+
+Shape: {mask_data.shape}"""
+        
+        plt.text(0.1, 0.9, stats_text, transform=plt.gca().transAxes,
+                fontsize=9, verticalalignment='top', fontfamily='monospace')
+        plt.axis('off')
+        plt.title(f'{op_title} - Statistics')
+    
+    plt.tight_layout()
+    plt.show()
+
+
 # =========================
 # 主流程
 # =========================
@@ -537,8 +632,8 @@ def main():
     other_overhead_time = 0.0
 
     # 路径自行修改
-    mask_dir = r"C:\Users\xrVis001\Desktop\EyeData\IXI-400-LPI\Allseg\haimaprocessed_binary"
-    output_dir = r"C:\Users\xrVis001\Desktop\EyeData\IXI-400-LPI\Allseg\haimaprocessed_binary\DepthAnalysis"
+    mask_dir = r"C:\Users\xrVis001\Desktop\EyeData\IXI-400-LPI\Allseg\ventricle_binary"
+    output_dir = r"C:\Users\xrVis001\Desktop\EyeData\IXI-400-LPI\Allseg\ventricle_binary\DepthAnalysis"
 
     print(f"Mask目录: {mask_dir}")
     print(f"输出目录: {output_dir}")
@@ -573,28 +668,19 @@ def main():
     # 在进入 GPU 分支前：
     V = np.prod(masks_data.shape[1:], dtype=np.int64)
     #B = pick_batch_size(V, bytes_per_voxel=4)   # 使用 float32，每体素 4 字节
-    B = 32   # 固定批次大小为32
+    B = 32   # 固定批次大小为128
     # 然后用 B 作为 batch_size
     print(f"B: {B}")
-
     # 2. 计算（>50 用批处理）
     use_batch_processing = masks_data.shape[0] > 50
     want_gpu = True  # 想用GPU就设 True
     t0 = time.time()
-    # 方法一：GPU/矢量化路径
-    scores_method1 = compute_inclusion_scores(
+    inclusion_scores = compute_inclusion_scores(
         masks_data,
         use_gpu=want_gpu,
         batch_size=B
     )
     gpu_compute_time = time.time() - t0  # 粗略记录（包含函数内部预处理/传输）
-
-    # 方法二：逐样本循环路径（CPU）
-    scores_method2 = compute_inclusion_scores_loop(masks_data)
-
-    # 对比两种方法结果
-    _cmp = compare_inclusion_methods(scores_method1, scores_method2, atol=1e-6, rtol=1e-6, make_plot=True)
-    inclusion_scores = scores_method1
 
     # 3. 排序分析
     t0 = time.time()
@@ -603,11 +689,22 @@ def main():
 
     # 4. 可视化
     t0 = time.time()
-    # 遵循不保存图片的要求，这里仅展示，不进行保存
+    # 遵循"不另行要求不保存图像"的规则，这里仅显示，不保存
     visualize_depth_analysis(inclusion_scores, mask_names, sorted_indices, output_dir=None)
     other_overhead_time += time.time() - t0
 
-    # 5. 保存结果
+    # 5. 创建三个mask操作结果
+    t0 = time.time()
+    results = create_mask_operations(masks_data, sorted_indices, mask_names, affine, header, output_dir)
+    other_overhead_time += time.time() - t0
+
+    # 6. 可视化mask操作结果
+    if results:
+        t0 = time.time()
+        visualize_mask_operations(results, output_dir=None)
+        other_overhead_time += time.time() - t0
+
+    # 7. 保存结果
     print(f"\n=== 保存分析结果 ===")
     t0 = time.time()
     os.makedirs(output_dir, exist_ok=True)
@@ -632,6 +729,12 @@ def main():
     print(f"处理了 {len(mask_names)} 个mask文件")
     print(f"深度范围: {np.min(inclusion_scores):.4f} - {np.max(inclusion_scores):.4f}")
     print(f"平均深度: {np.mean(inclusion_scores):.4f}")
+    
+    if results:
+        print(f"\n生成的文件:")
+        for key, result in results.items():
+            print(f"- {os.path.basename(result['path'])}: {result['voxels']:,} 激活体素")
+        print(f"所有结果已保存到: {output_dir}")
 
 
 if __name__ == "__main__":

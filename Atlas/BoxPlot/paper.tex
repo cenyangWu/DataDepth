@@ -1,0 +1,609 @@
+%\documentclass[journal]{vgtc}                     % final (journal style)
+%\documentclass[journal,hideappendix]{vgtc}        % final (journal style) without appendices
+\documentclass[review,journal]{vgtc}              % review (journal style)
+%\documentclass[review,journal,hideappendix]{vgtc} % review (journal style)
+%\documentclass[widereview]{vgtc}                  % wide-spaced review
+%\documentclass[preprint,journal]{vgtc}            % preprint (journal style)
+
+
+%% Uncomment one of the lines above depending on where your paper is
+%% in the conference process. ``review'' and ``widereview'' are for review
+%% submission, ``preprint'' is for pre-publication in an open access repository,
+%% and the final version doesn't use a specific qualifier.
+
+%% If you are submitting a paper to a conference for review with a double
+%% blind reviewing process, please use one of the ``review'' options and replace the value ``0'' below with your
+%% OnlineID. Otherwise, you may safely leave it at ``0''.
+\onlineid{1638}
+
+%% In preprint mode you may define your own headline. If not, the default IEEE copyright message will appear in preprint mode.
+%\preprinttext{To appear in IEEE Transactions on Visualization and Computer Graphics.}
+
+%% In preprint mode, this adds a link to the version of the paper on IEEEXplore
+%% Uncomment this line when you produce a preprint version of the article 
+%% after the article receives a DOI for the paper from IEEE
+%\ieeedoi{xx.xxxx/TVCG.201x.xxxxxxx}
+
+%% declare the category of your paper, only shown in review mode
+\vgtccategory{Research}
+
+%% please declare the paper type of your paper to help reviewers, only shown in review mode
+%% choices:
+%% * algorithm/technique
+%% * application/design study
+%% * evaluation
+%% * system
+%% * theory/model
+\vgtcpapertype{Data Transformations}
+
+%% Paper title.
+\title{Probabilistic Inclusion Depth}
+
+%% Author ORCID IDs should be specified using \authororcid like below inside
+%% of the \author command. ORCID IDs can be registered at https://orcid.org/.
+%% Include only the 16-digit dashed ID.
+\author{%
+  Cenyang Wu, Qinhan Yu, and 
+  Liang Zhou*
+}
+
+\authorfooter{
+  %% insert punctuation at end of each item
+  \item
+  	Cenyang Wu and Liang Zhou are with the Institute of Medical Technology, Peking University Health Science Center and National Institute of Health Data Science, Peking University.
+  	E-mails: 2311110804@stu.pku.edu.cn, zhoulng@pku.edu.cn.
+    \item
+  	Qinhan Yu is with the Center for Machine Learning Research, Peking University.
+  	E-mail: yuqinhan@stu.pku.edu.cn.
+    \item Liang Zhou is the corresponding author.
+}
+
+%% Abstract section.
+\abstract{%
+\textbf{Motivation.} Classical Inclusion Depth (ID) computes containment on binary masks, ignoring pixel-wise confidence. Its $\mathcal{O}(MN^2)$ complexity limits its use in high-resolution 3D data.\newline
+\textbf{Core Contributions.} We introduce \emph{Probabilistic Inclusion Depth (PID)}, which replaces binary containment with a \emph{probabilistic operator} ($\subset_{\!p}$) within the same computational framework as ID, enabling depth statistics to handle uncertainty. We also propose \emph{PID-mean}, which uses a mean probabilistic contour to reduce complexity to $\mathcal{O}(MN)$. Our parallel implementation (CPU multi-threading \& GPU CUDA) enables real-time performance for PID on xx voxel data with hundreds of contours.\newline
+\textbf{Results.} PID maintains high ranking consistency with ID (Kendall $\tau > 0.95$) while achieving significant speedups:xx$\times$ for 2D data and over xxx$\times$ for 3D data.
+}
+
+
+%% Keywords that describe your work. Will show as 'Index Terms' in journal
+%% please capitalize first letter and insert punctuation after last keyword
+\keywords{Ensemble visualization, uncertainty visualization, ensemble summarization, depth statistics}
+
+%% A teaser figure can be included as follows
+\teaser{
+
+  \caption{%
+ Visualization
+  }
+  \label{fig:teaser}
+}
+
+%% Uncomment below to disable the manuscript note
+%\renewcommand{\manuscriptnotetxt}{}
+
+%% Copyright space is enabled by default as required by guidelines.
+%% It is disabled by the 'review' option or via the following command:
+%\nocopyrightspace
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%% LOAD PACKAGES %%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% Tell graphicx where to find files for figures when calling \includegraphics.
+%% Note that due to the \DeclareGraphicsExtensions{} call it is no longer necessary
+%% to provide the the path and extension of a graphics file:
+%% \includegraphics{diamondrule} is completely sufficient.
+\graphicspath{{figs/}{figures/}{pictures/}{images/}{./}} % where to search for the images
+
+%% Only used in the template examples. You can remove these lines.
+\usepackage{tabu}                      % only used for the table example
+\usepackage{booktabs}                  % only used for the table example
+\usepackage{lipsum}                    % used to generate placeholder text
+\usepackage{mwe}                       % used to generate placeholder figures
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{svg}
+\usepackage{caption}
+\usepackage{subcaption}   
+\usepackage{float}
+%% We encourage the use of mathptmx for consistent usage of times font
+%% throughout the proceedingsd. However, if you encounter conflicts
+%% with other math-related packages, you may want to disable it.
+\usepackage{mathptmx}                  % use matching math font
+\usepackage{color}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\newcommand{\zl}[1]{\textcolor{orange}{#1}}
+\newcommand{\wcy}[1]{\textcolor{red}{#1}}
+\newcommand{\yqh}[1]{\textcolor{teal}{#1}}
+\newcommand{\MLS}{\mathit{MLS}}
+
+\begin{document}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%% START OF THE PAPER %%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% The ``\maketitle'' command must be the first command after the
+%% ``\begin{document}'' command. It prepares and prints the title block.
+%% the only exception to this rule is the \firstsection command
+%% First section / Title -------------------------------------------------------
+\firstsection{Introduction}
+\maketitle
+
+Statistical depth functions provide a center-outward ordering of elements in a dataset, forming the basis for non-parametric methods like contour boxplots. Early approaches like Contour Boxplot Depth (CBD) were computationally expensive ($\mathcal{O}(MN^3)$). Inclusion Depth (ID) offered a more efficient ($\mathcal{O}(MN^2)$) and geometrically intuitive alternative by measuring containment relationships. However, ID is limited to binary masks, precluding its use on the increasingly common \emph{probabilistic masks} (or soft masks) generated by modern deep learning models (e.g., from softmax outputs in medical image segmentation) or in fields like meteorology that deal with probabilistic forecasts.
+
+This work aims to bridge this gap. Our goal is to develop depth computation methods that handle uncertainty while simultaneously reducing computational complexity, making them practical for large-scale, high-resolution 3D ensemble data.
+These are our main contributions.
+\begin{itemize}
+    \item We introduce a probabilistic containment operator ($\subset_{\!p}$) and the Probabilistic Inclusion Depth (PID), enabling depth computation on contours with uncertainty.
+    \item We propose PID-Mean, which reduces the complexity of PID from $\mathcal{O}(MN^2)$ to $\mathcal{O}(MN)$. The same acceleration strategy also applies to ID.
+    \item We develop a parallel implementation that further accelerates depth computation, making complex 3D datasets feasible and enabling the rendering of a 3D BoxPlot.
+\end{itemize}
+%% ---------------------------------------------------------------------------
+\section{Related Work}
+\subsection{Contour Depth Methods}
+Contour depth statistics quantify the centrality of a shape within an ensemble. The Contour Boxplot (CBD)was a pioneering method, but its $\mathcal{O}(MN^3)$ complexity, where $M$ is the number of pixels/voxels and $N$ is the ensemble size, made it impractical for large data. Inclusion Depth (ID) and expected Inclusion Depth (eID) reduced this to $\mathcal{O}(MN^2)$ by defining depth based on minimizing the number of contours a given contour contains ($IN_{in}$) and is contained by ($IN_{out}$). These methods, however, are fundamentally designed for binary contours and cannot directly process probabilistic information.
+
+\subsection{Probabilistic Segmentation and Uncertainty}
+Modern segmentation methods, particularly deep neural networks, often output soft masks where each pixel value represents a probability or confidence score. Techniques like Monte Carlo Dropout (MC-Dropout), Deep Ensembles, and Temperature Scaling are used to estimate this uncertainty. While metrics like fuzzy Dice or probabilistic IoU exist for comparing soft masks, they do not provide the geometric, center-outward ordering that is the hallmark of statistical depth.
+
+\section{Probabilistic Inclusion Depth (PID)}
+
+\subsection{Recap: Epsilon Inclusion Depth (eID)}
+The Epsilon Inclusion Depth (eID) uses a continuous subset operator instead of binary containment. The epsilon subset operator $\subset_{\epsilon}$ for two sets $A, B \subset \mathbb{R}^2$ is defined as:
+\begin{equation}
+A \subset_{\epsilon} B = 1 - 
+\begin{cases} 
+0 & \text{if } |A| = 0, \\
+\frac{|A \setminus B|}{|A|} & \text{otherwise},
+\end{cases}
+\end{equation}
+where $|A|$ denotes the area of set $A$ and $A \setminus B$ is the set difference. This operator returns a value in $[0, 1]$, which is 1 if $A \subset B$ and decreases as more of $A$ lies outside of $B$.
+
+The definition of eID is analogous to ID, replacing $\subset$ with $\subset_{\epsilon}$. For a contour $c_i$ from an ensemble $\mathcal{C}$, we have:
+\begin{gather}
+\mathrm{IN_{in}}(c_i) = \frac{1}{N} \sum_{j=1}^{N} \mathrm{in}(c_i) \subset_{\epsilon} \mathrm{in}(c_j), \\
+\mathrm{IN_{out}}(c_i) = \frac{1}{N} \sum_{j=1}^{N} \mathrm{in}(c_j) \subset_{\epsilon} \mathrm{in}(c_i).
+\end{gather}
+The eID is the minimum of these two values:
+\begin{equation}
+\mathrm{eID}(c_i|\mathcal{C}) = \min\{\mathrm{IN_{in}}(c_i), \mathrm{IN_{out}}(c_i)\}.
+\end{equation}
+While eID handles geometric uncertainty to some extent, it still operates on binary regions, not probabilistic masks.
+
+\subsection{Distinction from eID}
+The fundamental difference between PID and eID lies in the input data they process. eID operates on \emph{binary masks} (defining crisp sets), where each pixel is definitively either inside (value 1) or outside (value 0) a contour, as shown in Figure~\ref{fig:binary_mask}. In contrast, PID is designed for \emph{probabilistic masks} (or soft masks), where pixel values are continuous in the range $[0, 1]$, as illustrated in Figure~\ref{fig:prob_mask}. This allows PID to incorporate and reason about uncertainty directly within the depth calculation framework.
+
+This distinction is critical when dealing with contours that share the same binary representation but differ in their underlying uncertainty. For instance, consider two probabilistic masks representing a high-uncertainty and a low-uncertainty contour member (Figure~\ref{fig:prob_masks_uncertainty}). If binarized using a 0.5 threshold, they produce identical masks, leading to the same eID. This loss of information is significant. PID, by operating on the original probability masks, can distinguish between these two cases, correctly identifying the high-uncertainty member as an outlier.
+
+\begin{figure}[h!]
+    \centering
+    \begin{subfigure}[b]{0.45\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{PIDFigs/Binary Mask.png}
+        \caption{Binary Mask for eID. The interior is 1 (white) and the exterior is 0 (black).}
+        \label{fig:binary_mask}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.45\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{PIDFigs/Probability Mask.png}
+        \caption{Probability Mask for PID. Pixel values range from 0 to 1, indicated by a color map.}
+        \label{fig:prob_mask}
+    \end{subfigure}
+    \caption{Comparison of input types for eID and PID.}
+    \label{fig:masks}
+\end{figure}
+
+\begin{figure}[h!]
+    \centering
+    \begin{subfigure}[b]{0.45\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{PIDFigs/HighUncertainty.png} 
+        \caption{High-Uncertainty Contour Member.}
+        \label{fig:high_uncertainty_mask}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.45\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{PIDFigs/LowUncertainty.png}
+        \caption{Low-Uncertainty Contour Member.}
+        \label{fig:low_uncertainty_mask}
+    \end{subfigure}
+    \caption{Two probabilistic masks that yield the same binary mask at a threshold but are distinguishable by PID.}
+    \label{fig:prob_masks_uncertainty}
+\end{figure}
+
+
+\subsection{Probabilistic Inclusion Depth (PID) Formulation}
+We define inclusion for probabilistic masks as a conditional expectation over locations typical for the reference mask. In this formulation, we work with probabilistic masks $u$ and $v$ where each pixel/voxel value represents a probability in the range $[0,1]$, and introduce a probabilistic inclusion operator $\subset_{\!p}$ for handling uncertainty in contour analysis.
+
+\paragraph{Definition via conditional expectation.}
+Let $(\Omega,\mathcal{F},\mu)$ be the image/voxel domain, where $\Omega$ represents the spatial domain (e.g., a 2D image or 3D volume), $\mathcal{F}$ is a $\sigma$-field of measurable sets, $\mu$ is a measure (either counting measure for discrete grids or Lebesgue measure for continuous domains),and $x \in \Omega$ denotes a spatial location (pixel or voxel coordinate).
+For a soft mask $u:\Omega\!\to\![0,1]$ (where $u$ maps each spatial location to a probability value), define its mass
+$m(u)=\int_\Omega u(x)\,\mathrm d\mu(x)$
+(the total probabilistic "volume" of the mask) and the probability measure $\pi_u$ induced by $u$. For any measurable set $E \subseteq \Omega$,
+\[
+\pi_u(E)=\frac{1}{m(u)}\int_E u(x)\,\mathrm d\mu(x),\qquad 
+\frac{\mathrm d\pi_u}{\mathrm d\mu}(x)=\frac{u(x)}{m(u)}\quad(m(u)>0).
+\]
+
+
+We define the probabilistic containment operator as
+\begin{equation}
+u\subset_{\!p}v \;:=\; \mathbb{E}_{X\sim \pi_u}\!\big[v(X)\big],
+\label{eq:expectation_form}
+\end{equation}
+where $\mathbb{E}[\cdot]$ denotes the expectation operator, and $X\sim \pi_u$ indicates that the random variable $X$ follows the probability distribution $\pi_u$. We adopt the convention $u\subset_{\!p}v=0$ if $m(u)=0$ (i.e., when the reference mask has zero mass).
+This reads as the the average inclusion of $v$ at locations typical for $u$.
+The operator is asymmetric (directional), monotone in $v$, scale-invariant in $u$, and it degenerates to ordinary set inclusion in the binary case.
+
+\paragraph{Why the expectation view?}
+The expectation form provides an immediately interpretable inclusion semantics: draw locations according to $u$ (i.e., typical for $u$) and average $v$ there.
+It naturally captures directionality ($u\subset_{\!p}v \neq v\subset_{\!p}u$), attains intuitive endpoints (if $v(x)=1$ wherever $u(x)>0$, the value is $1$; if $v\equiv 0$, it is $0$), reduces exactly to set inclusion for binary masks, and for soft masks yields values below $1$ that quantify how uncertainty/softness diminishes inclusion.
+
+\paragraph{Equivalent, reduction-friendly form.}
+By a single algebraic step,
+\begin{equation}
+\mathbb{E}_{X\sim \pi_u}[v(X)]
+=\frac{\int u\,v\,\mathrm d\mu}{\int u\,\mathrm d\mu}
+=1-\frac{\int u(1-v)\,\mathrm d\mu}{\int u\,\mathrm d\mu}.
+\end{equation}
+This yields:
+\begin{equation}
+u \subset_{\!p} v \;=\; 
+1-\frac{\mathbb{E}[u(1-v)]}{\mathbb{E}[u]}
+\;
+\label{eq:prob_contain}
+\end{equation}
+\noindent\emph{Discrete grid.}
+When $\Omega=\{1,\ldots,M\}$ (where $M$ represents the total number of pixels in 2D images or voxels in 3D volumes),
+
+\begin{equation}
+u\subset_{\!p}v=1-\frac{\sum_x u(x)(1-v(x))}{\sum_x u(x)}
+\end{equation}
+
+\paragraph{PID from the operator.}
+Using the probabilistic containment operator $\subset_{\!p}$, we define PID for an ensemble of $N$ contours $\{u_1, u_2, \ldots, u_N\}$, where each contour $c_i$ is represented by its corresponding probabilistic mask $u_i$:
+\begin{gather}
+\mathrm{IN\_in}^{\mathrm{p}}(u_i)=\frac1N\sum_{j=1}^{N}\!\bigl[u_i\subset_{\!p}u_j\bigr],\qquad
+\mathrm{IN\_out}^{\mathrm{p}}(u_i)=\frac1N\sum_{j=1}^{N}\!\bigl[u_j\subset_{\!p}u_i\bigr],\\[2pt]
+\mathrm{PID}(c_i)=\min\!\bigl(\mathrm{IN\_in}^{\mathrm{p}}(u_i),\,\mathrm{IN\_out}^{\mathrm{p}}(c_i)\bigr).
+\label{eq:pid}
+\end{gather}
+Here, $\mathrm{IN\_in}^{\mathrm{p}}(u_i)$ measures how much contour $c_i$ is contained within other contours in the ensemble (average inclusion of $u_i$ by others), while $\mathrm{IN\_out}^{\mathrm{p}}(u_i)$ measures how much $c_i$ contains other contours (average inclusion of others by $u_i$). The final PID value takes the minimum of these two measures.
+
+\paragraph{Binary specialization and relation to eID.}
+If $u=\mathbf{1}_A$ and $v=\mathbf{1}_B$ (where $\mathbf{1}_A$ and $\mathbf{1}_B$ are indicator functions that equal 1 inside sets $A$ and $B$ respectively, and 0 outside), then
+\begin{equation}
+u\subset_{\!p}v = 1 - 
+\begin{cases} 
+0 & \text{if } |A| = 0, \\
+\frac{|A \setminus B|}{|A|} & \text{otherwise},
+\end{cases}
+\end{equation}
+Here, $A\cap B$ denotes the intersection of sets $A$ and $B$, and $A\setminus B$ represents the set difference (elements in $A$ but not in $B$). Thus our operator coincides with the $\subset_\epsilon$ operator used by eID on binary sets; eID is the binary special case of PID.
+
+
+
+\subsection{Properties}
+We collect basic properties of the probabilistic inclusion operator and of PID. 
+Write $\hat u = u/\!\int u$ (when $\int u>0$) and define the linear functional
+$L_u(v)\!:=\!\langle \hat u,\,v\rangle=\int \hat u(x)\,v(x)\,{\rm d}\mu(x)
+=\mathbb{E}_{X\sim\pi_u}[v(X)]$; by convention $L_u(v)=0$ if $\int u=0$.
+Then $u\subset_{\!p}v=L_u(v)$ and the PID terms are averages of $L_{u_i}(\cdot)$.
+
+\paragraph{Operator-level properties (for fixed $u$).}
+\begin{itemize}
+\item \textbf{Range and extremal cases.} For $v:\Omega\to[0,1]$,
+$0\le L_u(v)\le 1$. Moreover, $L_u(v)=1$ iff $v(x)=1$ for $\pi_u$-a.e.\ $x$
+(i.e., wherever $u>0$), and $L_u(v)=0$ iff $v(x)=0$ for $\pi_u$-a.e.\ $x$
+(or $\int u=0$).
+
+\item \textbf{Linearity/convexity in $v$.} $L_u(\alpha v_1+\beta v_2)=\alpha L_u(v_1)+\beta L_u(v_2)$
+for all $\alpha,\beta\in\mathbb{R}$, hence $L_u$ is convex in $v$ on $[0,1]$.
+
+\item \textbf{Monotonicity in $v$.} If $v_1\le v_2$ a.e., then $L_u(v_1)\le L_u(v_2)$.
+
+\item \textbf{Scale-invariance in $u$ and directionality.} For any $\alpha>0$,
+$L_{\alpha u}(v)=L_u(v)$ (the operator uses $\hat u$), and in general
+$L_u(v)\neq L_v(u)$; inclusion is directional rather than symmetric.
+
+\item \textbf{Lipschitz in $v$.} For any $v_1,v_2$,
+\[
+|L_u(v_1)-L_u(v_2)|=\Big|\int \hat u\,(v_1-v_2)\,{\rm d}\mu\Big|
+\le \|v_1-v_2\|_\infty .
+\]
+
+\item \textbf{Lipschitz in $u$.} For $v:\Omega\to[0,1]$,
+\begin{align}
+|L_u(v)-L_{u'}(v)| &= \big|\mathbb{E}_{\pi_u}[v]-\mathbb{E}_{\pi_{u'}}[v]\big| \notag \\
+&\le \mathrm{TV}(\pi_u,\pi_{u'}) \notag \\
+&= \tfrac12\|\hat u-\hat u'\|_{1} \notag \\
+&\le \frac{\|u-u'\|_1}{m_{\min}} .
+\end{align}
+Thus $L_u$ depends continuously (Lipschitz) on $u$ provided the mass is bounded away from $0$.(the full proof can be presented in Appendix?)
+
+\item \textbf{eID as a special case of PID (binary consistency) and Lipschitz binary limit.}
+For \emph{binary} masks $u=\mathbf{1}_A$ and $v=\mathbf{1}_B$,
+\begin{equation}
+L_u(v) = 1 - 
+\begin{cases} 
+0 & \text{if } |A| = 0, \\
+\frac{|A \setminus B|}{|A|} & \text{otherwise},
+\end{cases}
+\end{equation}
+which is exactly the eID inclusion score. Hence, \emph{eID is the binary specialization of PID} obtained by restricting $u,v$ to $\{0,1\}$-valued masks.
+
+\medskip\noindent
+\textit{Lipschitz convergence to the binary special case.}
+Assume $|A|>0$, and let a sequence of probabilistic masks $(u_n,v_n)$ with $\int u_n\ge \underline m>0$, $u_n\to \mathbf{1}_A$, and $v_n\to \mathbf{1}_B$.
+By the triangle inequality together with the Lipschitz bounds in $v$ and in $u$,
+\[
+\begin{aligned}
+\bigl|L_{u_n}(v_n)-L_{\mathbf{1}_A}(\mathbf{1}_B)\bigr|
+&\le \bigl|L_{u_n}(v_n)-L_{u_n}(\mathbf{1}_B)\bigr|
+   + \bigl|L_{u_n}(\mathbf{1}_B)-L_{\mathbf{1}_A}(\mathbf{1}_B)\bigr| \\[2pt]
+&\le \|v_n-\mathbf{1}_B\|_\infty
+ \;+\; \frac{\|u_n-\mathbf{1}_A\|_1}{\min\{\int u_n,|A|\}}.
+\end{aligned}
+\]
+Since $u_n\to \mathbf{1}_A$, and $v_n\to \mathbf{1}_B$, and $\min\{\int u_n,|A|\}\!\ge\!\min\{\underline m,|A|\}\!>\!0$, it follows that
+\[
+\bigl|L_{u_n}(v_n)-\tfrac{|A\cap B|}{|A|}\bigr|\xrightarrow[n\to\infty]{} 0.
+\]
+Thus, as $(u_n,v_n)$ approach binary masks, \emph{PID converges to its binary special case eID} at a Lipschitz rate.
+
+
+
+
+\item \textbf{Invariance under measure-preserving transforms.}
+If $T:\Omega\!\to\!\Omega$ is a bijection with Jacobian $1$ (e.g., translations/rotations on 
+$\mathbb{R}^d$ with Lebesgue measure), then
+$L_{u\circ T^{-1}}(v\circ T^{-1})=L_u(v)$ (change of variables).
+\end{itemize}
+
+\paragraph{Consequences for PID.}
+Let $\{u_j\}_{j=1}^N$ be an ensemble. Using $L_u$,
+\begin{align}
+\mathrm{IN\_in}^{\mathrm p}(u_i) &= \frac1N\sum_{j=1}^N L_{u_i}(u_j), \notag \\
+\mathrm{IN\_out}^{\mathrm p}(u_i) &= \frac1N\sum_{j=1}^N L_{u_j}(u_i), \notag \\
+\mathrm{PID}(u_i) &= \min\bigl(\mathrm{IN\_in}^{\mathrm p},\,\mathrm{IN\_out}^{\mathrm p}\bigr).
+\end{align}
+Since each $L_{\cdot}(\cdot)\in[0,1]$ and is monotone in its second argument, the same holds for
+$\mathrm{IN\_in}^{\mathrm u}$ and $\mathrm{IN\_out}^{\mathrm u}$, hence for $\mathrm{PID}$.
+Moreover:
+\begin{itemize}
+\item \textbf{Consistency.} If all masks are binary, $\mathrm{PID}$ reduces to inclusion depth (eID/ID).
+\item \textbf{Isometry invariance.} Under any measure-preserving $T$ applied to every mask,
+$\mathrm{PID}$ is unchanged.
+\item \textbf{Robustness (Lipschitz continuity).}
+For fixed ensemble $\{u_j\}$ and two candidates $u_i,u_i'$ with masses bounded away from $0$,
+\begin{align}
+\big|\mathrm{IN\_out}^{\mathrm p}(u_i)&-\mathrm{IN\_out}^{\mathrm p}(u_i')\big| \notag \\
+&= \Big|\frac1N\sum_{j} \big(L_{u_j}(u_i)-L_{u_j}(u_i')\big)\Big| \notag \\
+&\le \|u_i-u_i'\|_\infty .
+\end{align}
+Similarly, perturbing the ensemble members $\{u_j\}$ yields
+\begin{align}
+\big|\mathrm{IN\_in}^{\mathrm p}(u_i)&-\mathrm{IN\_in}^{\mathrm p}(u_i)'\big| \notag \\
+&= \Big|\frac1N\sum_{j} \big(L_{u_i}(u_j)-L_{u_i}(u_j')\big)\Big| \notag \\
+&\le \frac1N\sum_j \|u_j-u_j'\|_\infty .
+\end{align}
+If one perturbs the reference of $L$ (i.e., $u$) instead of its argument, the preceding 
+bound via total variation gives
+$|L_{u}(v)-L_{u'}(v)|\le \|u-u'\|_1/m_{\min}$, and averaging preserves the bound.
+Hence $\mathrm{PID}$ is Lipschitz-continuous under bounded perturbations of masks.
+\end{itemize}
+
+
+\section{PID-mean (Linear Complexity)}
+\label{sec:pidmean}
+To overcome the quadratic complexity of PID, we introduce PID-mean, an approximation that reduces the runtime to be linear in the ensemble size.
+
+\subsection{Mean Probabilistic Contour}
+The core idea is to compute a single mean probabilistic contour $\bar{u}$ for the entire ensemble:
+\begin{equation}
+\bar u(x)=\frac1N\sum_{i=1}^{N}u_i(x)
+\end{equation}
+where $x$ is a spatial coordinate (pixel/voxel).
+
+\subsection{Algorithm}
+Instead of performing $N^2$ pairwise comparisons, PID-mean compares each contour $u_i$ only against the mean contour $\bar{u}$. This requires only two probabilistic containment calculations per contour:
+\begin{equation}
+\mathrm{IN\_in}^{\text{mean}}(u_i)=u_i\subset_{\!p}\bar u,\quad \mathrm{IN\_out}^{\text{mean}}(u_i)=\bar u\subset_{\!p}u_i
+\end{equation}
+This reduces the overall complexity to $\mathcal{O}(MN)$ with $\mathcal{O}(M)$ memory for storing the mean contour.
+\subsection{Intuition for PID-mean}
+Consider the ensemble of probabilistic contours as multiple delineations on a common spatial domain. Superposition of these delineations produces a \emph{consensus intensity map} $\bar u$, where higher intensities indicate stronger agreement that a location belongs to the interior. For a given ensemble member $u_i$, PID-mean evaluates two complementary criteria and takes their minimum as the depth:
+\begin{itemize}
+    \item \textbf{Recall perspective (member $\Rightarrow$ consensus).} Over locations typical for the member (weighted by $u_i$), how large is the consensus intensity $\bar u$ on average?
+    \[
+    u_i \subset_{\!p} \bar u = \mathbb{E}_{\pi_{u_i}}[\bar u].
+    \]
+    \item \textbf{Precision perspective (consensus $\Rightarrow$ member).} Over locations emphasized by the consensus (weighted by $\bar u$), how large is the member probability $u_i$ on average?
+    \[
+    \bar u \subset_{\!p} u_i = \mathbb{E}_{\pi_{\bar u}}[u_i].
+    \]
+\end{itemize}
+Taking the $\min$ acts as a conservative conjunction: only when both "member $\approx$ consensus" and "consensus $\approx$ member" are large is the contour appropriately \emph{central}. This construction naturally avoids two kinds of \emph{spurious centers}: \emph{large-but-shifted} members (broad support that overlaps the consensus yet is displaced overall; high recall but low precision) and \emph{small-but-peaky} members (covering only a small island of the consensus; high precision but low recall). Both are penalized by the $\min$ operator.
+
+The \emph{mean} consensus $\bar u$ is adopted for both representativeness and efficiency. Pairwise comparisons are expensive ($\mathcal{O}(N^2)$). For the recall term, linearity yields the equivalence
+\[
+ u_i \subset_{\!p} \bar u 
+ \;=\; \mathbb{E}_{\pi_{u_i}}\!\Big[\tfrac1N\sum_{j=1}^N u_j\Big]
+ \;=\; \tfrac1N\sum_{j=1}^N \mathbb{E}_{\pi_{u_i}}[u_j]
+ \;=\; \tfrac1N\sum_{j=1}^N (u_i \subset_{\!p} u_j),
+\]
+so averaging the ensemble first and then comparing is equivalent to comparing pairwise and then averaging. Hence $\bar u$ provides a faithful group representative while reducing complexity from $\mathcal{O}(N^2)$ to $\mathcal{O}(N)$. For the precision term, weighting by $\bar u$ furnishes a stable and interpretable representative assessment without the overhead of pairwise weighting; in practice, together with the recall term, it effectively suppresses spurious centers.
+
+\subsection{Applicability to general coordinates, manifolds, and non-uniform grids}
+PID-mean is \emph{coordinate-agnostic}. All quantities only depend on a background measure $\mu$ over the domain $(\Omega,\mathcal F,\mu)$.
+For any diffeomorphism $T:\Omega\!\to\!\Omega'$ with Jacobian determinant $|J_T|$,
+\[
+\frac{\int_\Omega u\,v\,\mathrm d\mu}{\int_\Omega u\,\mathrm d\mu}
+=\frac{\int_{\Omega'} (u\!\circ\!T^{-1})(v\!\circ\!T^{-1})\,|J_T|\,\mathrm d\mu'}{\int_{\Omega'} (u\!\circ\!T^{-1})\,|J_T|\,\mathrm d\mu'} ,
+\]
+so the Jacobian cancels between numerator and denominator. Consequently, the two PID-mean terms
+\(
+\mathrm{IN\_in}^{\text{mean}}=u_i\subset_{\!p}\bar u
+\)
+and
+\(
+\mathrm{IN\_out}^{\text{mean}}=\bar u\subset_{\!p}u_i
+\)
+are invariant under smooth reparameterizations of the domain. On a Riemannian manifold $(M,g)$, one simply uses the native volume measure
+\(
+\mathrm d\mu=\sqrt{\det g(x)}\,\mathrm dx ,
+\)
+where $g(x)$ is the Riemannian metric tensor in local coordinates.
+
+
+
+\paragraph{Pointwise mean is unchanged.}
+The mean probabilistic contour remains a pointwise (optionally reliability-weighted) average,
+\[
+\bar u(x)=\frac{1}{N}\sum_{i=1}^N u_i(x)
+\quad\text{or}\quad
+\bar u(x)=\sum_{i=1}^N \omega_i\,u_i(x),\ \sum_i\omega_i=1,
+\]
+independent of coordinates. Only the subsequent integrals use the domain's measure $\mu$.
+
+\paragraph{Discrete non-uniform grids (curvilinear meshes).}
+On discrete curvilinear or otherwise non-uniform meshes, let $w_x>0$ denote the physical area/volume of cell $x$. Replace all sums by \emph{volume-weighted} sums:
+\[
+u\subset_{\!p}v=\frac{\sum_x w_x\,u(x)\,v(x)}{\sum_x w_x\,u(x)} ,
+\]
+and the two PID-mean terms become
+\begin{align}
+\mathrm{IN\_in}^{\text{mean}}
+&=1-\frac{\sum_x w_x\,u_i(x)\,[1-\bar u(x)]}{\sum_x w_x\,u_i(x)}, \\
+\mathrm{IN\_out}^{\text{mean}}
+&=1-\frac{\sum_x w_x\,\bar u(x)\,[1-u_i(x)]}{\sum_x w_x\,\bar u(x)}.
+\end{align}
+This preserves semantics and leaves the algorithmic structure and complexity unchanged.
+
+\paragraph{Implementation note.}
+In our parallel implementation, non-uniform grids require only an additional read stream for $w$ and replacing each per-voxel contribution by $w\!\cdot(\cdot)$ in the reductions (e.g., $w\,u_i(1-\bar u)$ and $w\,\bar u(1-u_i)$). Arithmetic intensity, memory complexity, and scheduling strategies remain the same as in the Cartesian case.
+```
+
+\subsection{Experiments}
+On both synthetic and real-world public datasets, PID-mean produced rankings highly consistent with the full PID (Spearman's $\rho$ and Kendall's $\tau > 0.95$), while reducing runtimes by a factor of $\times$.
+
+\section{Parallel Implementation}
+To make PID practical for high-resolution 3D data, we developed a high-performance parallel implementation.
+
+\subsection{Concept and Objective Function}
+Building on Eq.~\eqref{eq:prob_contain} and Sec.~\ref{sec:pidmean}, we directly use the reduction-friendly forms
+\begin{align}
+ \mathrm{IN\_in}^{\text{mean}}(u_i) &= 1 - \frac{\sum_x u_i(x)\,(1-\bar u(x))}{\sum_x u_i(x)}, \\
+ \mathrm{IN\_out}^{\text{mean}}(u_i) &= 1 - \frac{\sum_x \bar u(x)\,(1-u_i(x))}{\sum_x \bar u(x)}.
+\end{align}
+When a denominator is zero we set the corresponding score to 1. The kernel outputs
+\(\mathrm{PID\text{-}mean}(c_i)=\min(\mathrm{IN\_in}^{\text{mean}},\mathrm{IN\_out}^{\text{mean}})\).
+This computation consists of per-voxel fused multiply–adds and global summations and is bandwidth-bound.
+
+\subsection{Intra-block Reduction and Memory Access Organization}
+We map \emph{one ensemble member per thread block}. Threads in a block traverse the voxel axis in a fixed-stride, strip-mined manner and accumulate in registers the following quantities:
+\begin{itemize}
+  \item \(\displaystyle A_i = \sum_x u_i(x)\) (denominator of \(\mathrm{IN\_in}^{\text{mean}}\));
+  \item \(\displaystyle N_1 = \sum_x u_i(x)\bigl(1-\bar u(x)\bigr)\) (numerator of \(\mathrm{IN\_in}^{\text{mean}}\));
+  \item \(\displaystyle A_{\bar u} = \sum_x \bar u(x)\) (precomputed once and reused on device; denominator of \(\mathrm{IN\_out}^{\text{mean}}\));
+  \item \(\displaystyle N_2 = \sum_x \bar u(x)\bigl(1-u_i(x)\bigr)\) (numerator of \(\mathrm{IN\_out}^{\text{mean}}\)).
+\end{itemize}
+Within each block, we perform a binary-tree reduction in shared memory: partial sums are written to shared memory and merged pairwise, halving the stride until 1. A single thread then evaluates
+\begin{align}
+ \mathrm{IN\_in}^{\text{mean}} &= 1-\frac{N_1}{A_i}, \\
+ \mathrm{IN\_out}^{\text{mean}} &= 1-\frac{N_2}{A_{\bar u}}, \\
+ \mathrm{PID\text{-}mean} &= \min\bigl(\mathrm{IN\_in}^{\text{mean}},\, \mathrm{IN\_out}^{\text{mean}}\bigr),
+\end{align}
+writes back the results, and assigns a score of 0 if the corresponding denominator is 0. To maximize throughput, inputs are flattened into a contiguous \emph{member-by-voxel} layout so that threads in the same warp perform \emph{coalesced} loads. The mask \(\bar u\) and the scalar \(A_{\bar u}\) are transferred to the device once and reused across batches, thereby reducing host-to-device traffic.
+
+\subsection{Two-stream Double-buffered Batching and Cost Model}
+To further reduce visible host–device transfer time, we employ a batched pipeline with \emph{two command streams and symmetric double buffering}: one stream handles host-to-device (H2D) transfers, and the other launches the reduction kernels and performs device-to-host (D2H) copies. On both host and device, we maintain two sets of input and output buffers. While batch \(t\) executes on the device, batch \(t\!+\!1\) is transferred concurrently in the other stream; D2H copies are issued upon kernel completion with event-based synchronization to avoid buffer hazards. This yields partial overlap between H2D and compute, and tail-pinned D2H.
+
+Let \(M\) denote the number of voxels and \(B\) the batch size (members per batch). With single precision and ignoring constants, the device memory footprint is approximately
+\[
+ \text{footprint} \;\approx\; 2\,B\,M\cdot 4\ +\ M\cdot 4\quad(\text{bytes}),
+ \qquad
+ B\ \le\ \left\lfloor \frac{\alpha\,M_{\mathrm{avail}}-4M}{8M} \right\rfloor,
+\]
+where \(M_{\mathrm{avail}}\) is available VRAM and \(\alpha\in(0,1)\) is a safety factor. On the host we use pinned (page-locked) memory to improve transfer bandwidth, and align \(B\) to 32/64 for steadier scheduling; when VRAM is tight we reduce \(B\) to remain runnable.
+
+The end-to-end time follows a max-term dominated overlap model, where the total execution time \(T\) is
+\[
+ T \;\approx\; \sum_{\text{batches}} \max\!\bigl\{ T_{\mathrm{H2D}},\ T_{\mathrm{K}},\ T_{\mathrm{D2H}} \bigr\} \ +\ T_{\mathrm{prep}} \ +\ T_{\mathrm{misc}}.
+\]
+Here, \(T_{\mathrm{H2D}}\), \(T_{\mathrm{K}}\), and \(T_{\mathrm{D2H}}\) represent the host-to-device transfer, kernel execution, and device-to-host transfer times per batch, respectively. The preparation time \(T_{\mathrm{prep}}\) includes memory allocation and initialization, while \(T_{\mathrm{misc}}\) accounts for other overheads. Due to the two-stream pipeline, these three operations can partially overlap within each batch, making the effective time per batch the maximum rather than the sum of individual components.
+
+Under the bandwidth-bound assumption, the kernel time scales approximately as
+\[
+ T_{\mathrm{K}}\ \propto\ \frac{B\,M}{\mathrm{BW}_{\mathrm{device}}},
+\]
+where \(\mathrm{BW}_{\mathrm{device}}\) denotes the device memory bandwidth. This relationship indicates that our reduction-based computation is memory-bound rather than compute-bound. When \(M\) is large or host–device bandwidth is limited, \(T_{\mathrm{H2D}}\) or \(T_{\mathrm{D2H}}\) may dominate the per-batch time. The two-stream, double-buffered scheduling and the reuse of \(\bar u\) aim to decrease the transfer share and smooth inter-batch stalls, thereby sustaining robust scalability on high-resolution 3D data.
+
+\section{Experimental Design}
+\subsection{Datasets}
+We evaluated our methods on a diverse range of datasets:
+\begin{itemize}
+    \item \textbf{Synthetic probabilistic contours} with varying levels of noise.
+    \item \textbf{Medical:} Head-and-neck CT softmax outputs from a segmentation model.
+    \item \textbf{Meteorological:} ECMWF 500 hPa geopotential height.
+
+\end{itemize}
+
+\subsection{Evaluation Metrics}
+\begin{itemize}
+    \item \textbf{Performance:} Runtime and peak GPU memory usage.
+    \item \textbf{Ranking Consistency:} Kendall's $\tau$ and Spearman's $\rho$ correlation coefficients against the baseline ID rankings.
+    
+\end{itemize}
+
+\subsection{Results and Discussion}
+Our experiments confirm that PID-mean offers significant speed and memory advantages over PID and ID with minimal impact on ranking quality. PID demonstrates greater robustness to soft noise compared to ID. The parallel implementation proved essential for enabling interactive analysis of 3D data.
+
+\section{Application Examples}
+\begin{itemize}
+    \item \textbf{Probabilistic Contour Boxplots:} We develop contour boxplots that visualize depth quantiles and confidence bands derived from PID.
+    \item \textbf{Segmentation Quality Control:} Low-depth contours identified by PID can effectively flag high-risk or outlier segmentations for review.
+   
+\end{itemize}
+
+\section{Conclusion and Outlook}
+PID successfully integrates pixel-level uncertainty into depth computation, achieving both theoretical innovation and practical breakthrough in efficiency. The combination of PID-mean and our parallel implementation makes depth analysis of high-resolution 3D ensembles a reality.
+
+Future work could explore:
+\begin{itemize}
+    \item Developing methods for spatio-temporal probabilistic surfaces and dynamic graphs.
+\end{itemize}
+
+%% ---------------------------------------------------------------------------
+
+
+
+
+
+
+%% if specified like this the section will be omitted in review mode
+\acknowledgments{%
+	The authors wish to thank A, B, and C.
+  This work was supported in part by a grant from XYZ (\# 12345-67890).%
+}
+
+
+\bibliographystyle{abbrv-doi-hyperref}
+%\bibliographystyle{abbrv-doi-hyperref-narrow}
+%\bibliographystyle{abbrv-doi}
+%\bibliographystyle{abbrv-doi-narrow}
+
+\bibliography{datadepth}
+
+
+\appendix % You can use the `hideappendix` class option to skip everything after \appendix
+
+\end{document}
+
